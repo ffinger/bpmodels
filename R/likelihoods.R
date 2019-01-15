@@ -106,6 +106,7 @@ offspring_ll <- function(x, offspring, stat, n=100, ...) {
 ##'
 ##' @param x vector of sizes or lengths of transmission chains
 ##' @param ... parameters for the offspring distribution
+##' @param obs_prob observation probability (assumed constant)
 ##' @param stat statistic given as \code{x} ("size" or "length" of chains)
 ##' @param infinite any chains of this size/length will be treated as infinite
 ##' @param exclude any sizes/lengths to exclude from the likelihood calculation
@@ -113,12 +114,17 @@ offspring_ll <- function(x, offspring, stat, n=100, ...) {
 ##' @inheritParams chain_sim
 ##' @seealso pois_size_ll nbinom_size_ll gborel_size_ll pois_length_ll geom_length_ll offspring_ll
 ##' @author Sebastian Funk
-chain_ll <- function(x, offspring, ..., stat=c("size", "length"), infinite = Inf, exclude)
+chain_ll <- function(x, offspring, ..., obs_prob=1, stat=c("size", "length"), infinite = Inf, exclude)
 {
   stat <- match.arg(stat)
 
-  if (any(x >= infinite)) {
-    calc_sizes <- seq_len(infinite)
+  ## checks
+  if (obs_prob <= 0 || obs_prob > 1) stop("'obs_prob' must be within (0,1]")
+  if (obs_prob < 1 && !is.finite(infinite)) infinite <- max(x) + 1
+
+  ## determine for which sizes to calculate the likelihood (for true chain size)
+  if (any(x >= infinite) || obs_prob < 1) {
+    calc_sizes <- seq_len(infinite-1)
   } else {
     calc_sizes <- unique(c(1, x))
   }
@@ -137,16 +143,38 @@ chain_ll <- function(x, offspring, ..., stat=c("size", "length"), infinite = Inf
               c(list(x=calc_sizes, offspring=offspring, stat=stat), pars))
   }
 
+  ## assign probabilities to infinite outbreak sizes
+  if (any(x >= infinite) || obs_prob < 1) {
+    x[x >= infinite] <- infinite
+    likelihoods[infinite] <- complementary_logprob(likelihoods)
+  }
+
+  ## adjust for binomial observation probabilities
+  if (obs_prob < 1) {
+    ## determine for which sizes to calculate the likelihood (for observed chain size)
+    if (any(x >= infinite)) {
+      prob_calc_sizes <- seq_len(infinite-1)
+    } else {
+      prob_calc_sizes <- unique(x)
+    }
+    updated_likelihoods <- vapply(prob_calc_sizes, function(size) {
+      obs_likelihoods <- dbinom(size, size=seq(size, infinite-1), prob=obs_prob, log=TRUE) + log(obs_prob)
+      obs_likelihoods <-
+        c(rep(-Inf, size-1), obs_likelihoods, complementary_logprob(obs_likelihoods))
+      matrixStats::logSumExp(obs_likelihoods + likelihoods)
+    }, .0)
+
+    likelihoods <- c()
+    likelihoods[prob_calc_sizes] <- updated_likelihoods
+    ## assign probabilities to infinite outbreak sizes
+    if (any(x >= infinite) || obs_prob < 1) likelihoods[infinite] <- complementary_logprob(likelihoods)
+  }
+
   if (!missing(exclude)) {
     likelihoods <- likelihoods - log(-expm1(sum(likelihoods[exclude])))
     likelihoods[exclude] <- -Inf
   }
 
-  if (any(x >= infinite)) {
-    maxl <- log1p(-sum(exp(likelihoods), na.rm = TRUE))
-    likelihoods <- c(likelihoods, maxl)
-    x[x > infinite] <- infinite + 1
-  }
   chain_likelihoods <- likelihoods[x]
 
   return(sum(chain_likelihoods))
