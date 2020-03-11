@@ -6,7 +6,8 @@
 for depletion of susceptibles.}
 \usage{
 chain_sim_susc(offspring = c("pois", "nbinom"), mn_offspring,
-  disp_offspring, serial, t0 = 0, tf = Inf, pop, initial_immune = 0)
+  disp_offspring = NULL, serial, t0 = 0, tf = Inf, pop,
+  initial_immune = 0, adjust_params = NULL)
 }
 \arguments{
 \item{offspring}{offspring distribution: a character string corresponding to
@@ -30,6 +31,11 @@ Value must be >= 0.}
 \item{pop}{the population}
 
 \item{initial_immune}{the number of initial immunes in the population}
+
+\item{adjust_params}{a function that takes the current time t and simulation
+parameters (susc, mn_offspring, disp_offspring), modifies them and
+returns them as a list. Modifications to susc are kept until the end of
+the chain, modifications to mn and disp are only for the current time t}
 }
 \value{
 a data frame with columns `time`, `id` (a unique ID for each

@@ -99,8 +99,7 @@ test_that("Errors are thrown",
             serial = function(x) 3,
             pop = 100
             ),
-        "Offspring distribution 'nbinom' requires argument
-                disp_offspring > 1. Use 'pois' if there is no overdispersion.")
+        "Offspring distribution 'nbinom' requires argument disp_offspring > 1. Use 'pois' if there is no overdispersion.")
     expect_error(
         chain_sim_susc(
             "nbinom",
@@ -108,6 +107,6 @@ test_that("Errors are thrown",
             serial = function(x) 3,
             pop = 100
             ),
-        "argument \"disp_offspring\" is missing, with no default")
+        "Offspring distribution 'nbinom' requires argument disp_offspring.")
 
 })

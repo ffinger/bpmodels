@@ -15,6 +15,10 @@
 ##' @param tf end time
 ##' @param pop the population
 ##' @param initial_immune the number of initial immunes in the population
+##' @param adjust_params a function that takes the current time t and simulation
+##'      parameters (susc, mn_offspring, disp_offspring), modifies them and
+##'      returns them as a list. Modifications to susc are kept until the end of
+##'      the chain, modifications to mn and disp are only for the current time t
 ##' @return a data frame with columns `time`, `id` (a unique ID for each
 ##'     individual element of the chain), `ancestor` (the ID of the ancestor
 ##'      of each element), and `generation`.
@@ -33,25 +37,27 @@
 chain_sim_susc <- function(
     offspring = c("pois", "nbinom"),
     mn_offspring,
-    disp_offspring,
+    disp_offspring = NULL,
     serial,
     t0 = 0,
     tf = Inf,
     pop,
-    initial_immune = 0
+    initial_immune = 0,
+    adjust_params = NULL
 ) {
 
     offspring <- match.arg(offspring)
 
     if (offspring == "pois") {
-        if (!missing(disp_offspring)) {
-            warning("argument disp_offspring not used for
-                poisson offspring distribution.")
+        if (!missing(disp_offspring) & !is.null(disp_offspring)) {
+            warning("Argument disp_offspring not used for
+                poisson offspring distribution. Use negbin
+                to model dispersion.")
         }
 
         ## using a right truncated poisson distribution
         ## to avoid more cases than susceptibles
-        offspring_fun <- function(n, susc) {
+        offspring_fun <- function(n, susc, mn_offspring, disp_offspring) {
             truncdist::rtrunc(
                 n,
                 spec = "pois",
@@ -61,12 +67,14 @@ chain_sim_susc <- function(
 
     } else if (offspring  == "nbinom") {
 
-        if (disp_offspring <= 1) { ## dispersion index
-            stop("Offspring distribution 'nbinom' requires argument
-                disp_offspring > 1. Use 'pois' if there is no overdispersion.")
+        if (missing(disp_offspring)) {
+                    stop("Offspring distribution 'nbinom' requires argument disp_offspring.")
+        } else if (is.na(disp_offspring) |
+                disp_offspring <= 1) {
+                    stop("Offspring distribution 'nbinom' requires argument disp_offspring > 1. Use 'pois' if there is no overdispersion.")
         }
 
-        offspring_fun <- function(n, susc) {
+        offspring_fun <- function(n, susc, mn_offspring, disp_offspring) {
             ## get distribution params from mean and dispersion
             ## see ?rnbinom for parameter definition
             new_mn <- mn_offspring * susc / pop ##apply susceptibility
@@ -80,6 +88,19 @@ chain_sim_susc <- function(
                 b = susc,
                 mu = new_mn,
                 size = size)
+        }
+    }
+
+    ## generic adjust params function used when none given.
+    ## doesn't modify anything, just packs the params up in
+    ## a list as required
+    if (is.null(adjust_params) | missing(adjust_params)) {
+        adjust_params <- function(t, pop, susc, mn_offspring, disp_offspring) {
+            list(
+                susc = susc,
+                mn_offspring = mn_offspring,
+                disp_offspring = disp_offspring
+            )
         }
     }
 
@@ -105,19 +126,34 @@ chain_sim_susc <- function(
         ## select from which case to generate offspring
         t <- min(tdf$time[!tdf$offspring_generated]) #lowest unsimulated t
 
-        ## index of the first in df with t, extract vars
-        idx <- which(tdf$time == t & !tdf$offspring_generated)[1]
-        id_parent <- tdf$id[idx]
-        t_parent <- tdf$time[idx]
-        gen_parent <- tdf$generation[idx]
+        ## function that can accomodate changes in parameters
+        ## used to simulate interventions
 
-        ## generate it
-        current_max_id <- max(tdf$id)
-        n_offspring <- offspring_fun(1, susc)
+        params <- adjust_params(t, pop, susc, mn_offspring, disp_offspring)
+        params$n <- 1
+
+        ## modifications to susc are kept, modifications to other model
+        ## parameters are only for the current run.
+        susc <- params$susc
+
+        ## check that the adjustment hasn't brought susc to 0, else we are done
+        if (susc <= 1) {
+            break()
+        }
+
+        ## generate number of offspring
+        n_offspring <- do.call(offspring_fun, params)
 
         if (n_offspring %% 1 > 0) {
             stop("Offspring distribution must return integers")
         }
+
+        ## check for which case and save its properties
+        idx <- which(tdf$time == t & !tdf$offspring_generated)[1]
+        id_parent <- tdf$id[idx]
+        t_parent <- tdf$time[idx]
+        gen_parent <- tdf$generation[idx]
+        current_max_id <- max(tdf$id)
 
         ## mark as done
         tdf$offspring_generated[idx] <- TRUE
