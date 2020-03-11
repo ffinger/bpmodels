@@ -49,7 +49,8 @@ chain_sim_susc <- function(
     offspring <- match.arg(offspring)
 
     if (offspring == "pois") {
-        if (!missing(disp_offspring) & !is.null(disp_offspring)) {
+        if (!missing(disp_offspring) & !is.null(disp_offspring) &
+                !is.na(disp_offspring) & disp_offspring != 1) {
             warning("Argument disp_offspring not used for
                 poisson offspring distribution. Use negbin
                 to model dispersion.")
