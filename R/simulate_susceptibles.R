@@ -15,10 +15,14 @@
 ##' @param tf end time
 ##' @param pop the population
 ##' @param initial_immune the number of initial immunes in the population
-##' @param adjust_params a function that takes the current time t and simulation
-##'      parameters (susc, mn_offspring, disp_offspring), modifies them and
-##'      returns them as a list. Modifications to susc are kept until the end of
-##'      the chain, modifications to mn and disp are only for the current time t
+##' @param adjust_parameters a function that takes the current time t and
+##'   simulation parameters (number of susceptibles, mn_offspring, disp_offspring), modifies them
+##'   and returns them as a list. Modifications to susc are kept until the end of
+##'   the chain, modifications to mn and disp are only applied at the current time step t.
+##'   Function arguments are t (current time), pop (population), params (List of parameters to the offspring function,
+##'   to be modified by adjust_parameters. Contains the number of current susceptibles susc, mn_offspring and disp_offspring.),
+##'   and additional arguments as a list (see adjust_arguments below). Returns list of parameters in the same format as params.
+##' @param adjust_arguments additional arguments to adjust_parameters in the form of a list.
 ##' @return a data frame with columns `time`, `id` (a unique ID for each
 ##'     individual element of the chain), `ancestor` (the ID of the ancestor
 ##'      of each element), and `generation`.
@@ -43,14 +47,14 @@ chain_sim_susc <- function(
     tf = Inf,
     pop,
     initial_immune = 0,
-    adjust_params = NULL
+    adjust_parameters = NULL,
+    adjust_arguments = list()
 ) {
 
     offspring <- match.arg(offspring)
 
     if (offspring == "pois") {
-        if (!missing(disp_offspring) & !is.null(disp_offspring) &
-                !is.na(disp_offspring) & disp_offspring != 1) {
+        if (!is.null(disp_offspring)) {
             warning("Argument disp_offspring not used for
                 poisson offspring distribution. Use negbin
                 to model dispersion.")
@@ -93,15 +97,10 @@ chain_sim_susc <- function(
     }
 
     ## generic adjust params function used when none given.
-    ## doesn't modify anything, just packs the params up in
-    ## a list as required
-    if (is.null(adjust_params) | missing(adjust_params)) {
-        adjust_params <- function(t, pop, susc, mn_offspring, disp_offspring) {
-            list(
-                susc = susc,
-                mn_offspring = mn_offspring,
-                disp_offspring = disp_offspring
-            )
+    ## doesn't modify anything
+    if (is.null(adjust_parameters) | missing(adjust_parameters)) {
+        adjust_parameters <- function(t, pop, params, adjust_arguments) {
+            return(params)
         }
     }
 
@@ -117,11 +116,18 @@ chain_sim_susc <- function(
     susc <- pop - initial_immune - 1L
     t <- t0
 
+    params <- list( #offspring parameters
+        n = 1,
+        susc = susc,
+        mn_offspring = mn_offspring,
+        disp_offspring = disp_offspring
+    )
+
     ## continue if any unsimulated has t <= tf
     ## AND there is still susceptibles left
     while (
         any(tdf$time[!tdf$offspring_generated] <= tf) &
-        susc > 0
+            params$susc > 0
         ) {
 
         ## select from which case to generate offspring
@@ -129,21 +135,19 @@ chain_sim_susc <- function(
 
         ## function that can accomodate changes in parameters
         ## used to simulate interventions
-
-        params <- adjust_params(t, pop, susc, mn_offspring, disp_offspring)
-        params$n <- 1
+        params_adj <- adjust_parameters(t, pop, params, adjust_arguments)
 
         ## modifications to susc are kept, modifications to other model
-        ## parameters are only for the current run.
-        susc <- params$susc
+        ## parameters are only for the current iteration.
+        params$susc <- params_adj$susc
 
         ## check that the adjustment hasn't brought susc to 0, else we are done
-        if (susc <= 1) {
+        if (params$susc <= 1) {
             break()
         }
 
         ## generate number of offspring
-        n_offspring <- do.call(offspring_fun, params)
+        n_offspring <- do.call(offspring_fun, params_adj)
 
         if (n_offspring %% 1 > 0) {
             stop("Offspring distribution must return integers")
@@ -181,7 +185,7 @@ chain_sim_susc <- function(
         }
 
         ## adjust susceptibles
-        susc <- susc - n_offspring
+        params$susc <- params$susc - n_offspring
     }
 
     ## remove cases with time > tf that could
